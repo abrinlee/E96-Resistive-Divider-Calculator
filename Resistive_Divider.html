@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resistor Divider Calculator</title>
+    <!-- Include MathJax library -->
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script type="text/javascript" id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+    </script>
+    <script>
+        // Constants equivalent to the Python script's E96 and multipliers
+        const e96BaseValues = [
+            1.00, 1.02, 1.05, 1.07, 1.10, 1.13, 1.15, 1.18,
+            1.21, 1.24, 1.27, 1.30, 1.33, 1.37, 1.40, 1.43,
+            1.47, 1.50, 1.54, 1.58, 1.62, 1.65, 1.69, 1.74,
+            1.78, 1.82, 1.87, 1.91, 1.96, 2.00, 2.05, 2.10,
+            2.15, 2.21, 2.26, 2.32, 2.37, 2.43, 2.49, 2.55,
+            2.61, 2.67, 2.74, 2.80, 2.87, 2.94, 3.01, 3.09,
+            3.16, 3.24, 3.32, 3.40, 3.48, 3.57, 3.65, 3.74,
+            3.83, 3.92, 4.02, 4.12, 4.22, 4.32, 4.42, 4.53,
+            4.64, 4.75, 4.87, 4.99, 5.11, 5.23, 5.36, 5.49,
+            5.62, 5.76, 5.90, 6.04, 6.19, 6.34, 6.49, 6.65,
+            6.81, 6.98, 7.15, 7.32, 7.50, 7.68, 7.87, 8.06,
+            8.25, 8.45, 8.66, 8.87, 9.09, 9.31, 9.53, 9.76
+        ];
+        const multipliers = [
+            0.000001, 0.00001, 0.0001, 0.001, 0.01, 0.1,
+            1, 10, 100, 1000, 10000, 100000, 1000000, 10000000
+        ];
+
+        function calculateResistors() {
+            let Vin = parseFloat(document.getElementById('Vin').value);
+            let Vo = parseFloat(document.getElementById('Vo').value);
+            let Imax = parseFloat(document.getElementById('Imax').value);
+
+            if (isNaN(Vin) || isNaN(Vo) || isNaN(Imax) || Vin <= 0 || Vo <= 0 || Imax <= 0) {
+                alert("Please enter valid positive numbers for all values.");
+                return;
+            }
+            if (Vo >= Vin) {
+                alert("Output voltage (Vo) must be less than input voltage (Vin).");
+                return;
+            }
+
+            let Rb_min = Vo / Imax;
+            let log_val = Math.log10(Rb_min);
+            let exponent = Math.floor(log_val);
+            let mantissa = Math.pow(10, log_val - exponent);
+            let closest_base = e96BaseValues.reduce((prev, curr) => 
+                Math.abs(curr - mantissa) < Math.abs(prev - mantissa) ? curr : prev);
+            let closest_mult = Math.pow(10, exponent);
+            let extendedList = generateExtendedList(closest_base, closest_mult);
+
+            let bestError = Infinity;
+            let bestRb = null;
+            let bestRt = null;
+            let bestVout = null;
+            let bestIstring = null;
+            let bestPtop = null;
+            let bestPbot = null;
+
+            extendedList.forEach(Rb => {
+                let Ibottom = Vo / Rb;
+                if (Ibottom > Imax) return;
+                let idealRtop = (Vin - Vo) / Ibottom;
+                if (idealRtop <= 0) return;
+                let topCandidates = findTwoE96Values(idealRtop);
+                topCandidates.forEach(Rt => {
+                    let actualVout = Vin * (Rb / (Rb + Rt));
+                    if (actualVout > Vo) return;
+                    let error = calculateError(Vin, Vo, Rb, Rt);
+                    if (error < bestError) {
+                        bestError = error;
+                        bestRb = Rb;
+                        bestRt = Rt;
+                        bestVout = actualVout;
+                        bestIstring = Vin / (Rb + Rt);
+                        bestPtop = Rt * Math.pow(bestIstring, 2);
+                        bestPbot = Rb * Math.pow(bestIstring, 2);
+                    }
+                });
+            });
+
+            if (bestRb && bestRt) {
+                document.getElementById("results").innerHTML = `
+                    Rtop: ${formatResistorValue(bestRt)}<br>
+                    Rbottom: ${formatResistorValue(bestRb)}<br>
+                    Actual Vout: ${bestVout.toFixed(4)} V<br>
+                    Error: ${(bestError * 100).toFixed(2)}%<br>
+                    String Current: ${bestIstring.toFixed(6)} A<br>
+                    Power (Rtop): ${bestPtop.toFixed(6)} W<br>
+                    Power (Rbottom): ${bestPbot.toFixed(6)} W
+                `;
+            } else {
+                document.getElementById("results").innerHTML = "No valid resistor pair found under these constraints.";
+            }
+        }
+
+        function calculateError(Vin, Vo, Rb, Rt) {
+            let actualVout = Vin * (Rb / (Rb + Rt));
+            return Math.abs((actualVout / Vo) - 1);
+        }
+
+        function findTwoE96Values(value) {
+            if (value <= 0) return [];
+            let logValue = Math.log10(value);
+            let exponent = Math.floor(logValue);
+            let mantissa = Math.pow(10, logValue - exponent);
+            let idx = 0;
+            while (idx < e96BaseValues.length && e96BaseValues[idx] < mantissa) idx++;
+            let candidates = [];
+            if (idx > 0) candidates.push(e96BaseValues[idx - 1] * Math.pow(10, exponent));
+            if (idx < e96BaseValues.length) candidates.push(e96BaseValues[idx] * Math.pow(10, exponent));
+            return candidates;
+        }
+
+        function generateExtendedList(startValue, startMultiplier) {
+            let extendedList = [];
+            let baseIndex = e96BaseValues.indexOf(startValue);
+            let multiIndex = multipliers.indexOf(startMultiplier);
+            for (let i = 0; i < 96; i++) {
+                if (baseIndex >= e96BaseValues.length) {
+                    baseIndex = 0;
+                    multiIndex++;
+                    if (multiIndex >= multipliers.length) break;
+                }
+                let val = e96BaseValues[baseIndex] * multipliers[multiIndex];
+                extendedList.push(val);
+                baseIndex++;
+            }
+            return extendedList;
+        }
+
+        function formatResistorValue(value) {
+            if (value < 0.001) return `${(value * 1e6).toFixed(1)} mΩ`;
+            else if (value < 1) return `${(value * 1e3).toFixed(1)} Ω`;
+            else if (value < 10) return `${value.toFixed(2)} Ω`;
+            else if (value < 1000) return `${value.toFixed(1)} Ω`;
+            else if (value < 10000) return `${(value / 1e3).toFixed(2)} kΩ`;
+            else if (value < 1e6) return `${(value / 1e3).toFixed(1)} kΩ`;
+            else if (value < 10e6) return `${(value / 1e6).toFixed(2)} MΩ`;
+            else return `${(value / 1e6).toFixed(1)} MΩ`;
+        }
+
+        function runTests() {
+            let testResults = [];
+            let passed = true;
+
+            // Test 1: Error Calculation
+            let error = calculateError(10, 5, 1000, 1000);
+            let test1 = Math.abs(error - 0) < 1e-6;
+            testResults.push(`Test 1 - Error Calculation: ${test1 ? "✅ Passed" : "❌ Failed"}`);
+            if (!test1) passed = false;
+
+            // Test 2: Find Two E96 Values
+            let vals = findTwoE96Values(150);
+            let test2 = vals.length > 0;
+            testResults.push(`Test 2 - E96 Value Finder: ${test2 ? "✅ Passed" : "❌ Failed"}`);
+            if (!test2) passed = false;
+
+            // Test 3: Generate Extended List
+            let extList = generateExtendedList(1.00, 100);
+            let test3 = extList.length >= 96;
+            testResults.push(`Test 3 - Extended List Generation: ${test3 ? "✅ Passed" : "❌ Failed"}`);
+            if (!test3) passed = false;
+
+            // Test 4: High Voltage, Moderate Current (Vin=12V, Vo=5V, Imax=10mA)
+            let Rb_min1 = 5 / 0.01;
+            let log_val1 = Math.log10(Rb_min1);
+            let exp1 = Math.floor(log_val1);
+            let mant1 = Math.pow(10, log_val1 - exp1);
+            let base1 = e96BaseValues.reduce((prev, curr) => Math.abs(curr - mant1) < Math.abs(prev - mant1) ? curr : prev);
+            let mult1 = Math.pow(10, exp1);
+            let list1 = generateExtendedList(base1, mult1);
+            let result1 = analyzeAllValues(12, 5, 0.01, list1);
+            let test4a = result1.bestRb !== null;
+            let test4b = result1.bestRt !== null;
+            let test4c = Math.abs(result1.bestVout - 5) / 5 < 0.05; // 5% tolerance
+            let test4d = result1.bestIstring <= 0.01;
+            testResults.push(`Test 4 - High Voltage (12V, 5V, 10mA):`);
+            testResults.push(`  - Rb Found: ${test4a ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Rt Found: ${test4b ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Vout Accurate: ${test4c ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Current Limit: ${test4d ? "✅ Passed" : "❌ Failed"}`);
+            if (!test4a || !test4b || !test4c || !test4d) passed = false;
+
+            // Test 5: Low Voltage, High Current (Vin=3.3V, Vo=1.8V, Imax=100mA)
+            let Rb_min2 = 1.8 / 0.1;
+            let log_val2 = Math.log10(Rb_min2);
+            let exp2 = Math.floor(log_val2);
+            let mant2 = Math.pow(10, log_val2 - exp2);
+            let base2 = e96BaseValues.reduce((prev, curr) => Math.abs(curr - mant2) < Math.abs(prev - mant2) ? curr : prev);
+            let mult2 = Math.pow(10, exp2);
+            let list2 = generateExtendedList(base2, mult2);
+            let result2 = analyzeAllValues(3.3, 1.8, 0.1, list2);
+            let test5a = result2.bestRb !== null;
+            let test5b = result2.bestRt !== null;
+            let test5c = Math.abs(result2.bestVout - 1.8) / 1.8 < 0.05;
+            let test5d = result2.bestIstring <= 0.1;
+            testResults.push(`Test 5 - Low Voltage (3.3V, 1.8V, 100mA):`);
+            testResults.push(`  - Rb Found: ${test5a ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Rt Found: ${test5b ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Vout Accurate: ${test5c ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Current Limit: ${test5d ? "✅ Passed" : "❌ Failed"}`);
+            if (!test5a || !test5b || !test5c || !test5d) passed = false;
+
+            // Test 6: Tight Constraints (Vin=5V, Vo=2V, Imax=1mA)
+            let Rb_min3 = 2 / 0.001;
+            let log_val3 = Math.log10(Rb_min3);
+            let exp3 = Math.floor(log_val3);
+            let mant3 = Math.pow(10, log_val3 - exp3);
+            let base3 = e96BaseValues.reduce((prev, curr) => Math.abs(curr - mant3) < Math.abs(prev - mant3) ? curr : prev);
+            let mult3 = Math.pow(10, exp3);
+            let list3 = generateExtendedList(base3, mult3);
+            let result3 = analyzeAllValues(5, 2, 0.001, list3);
+            let test6a = result3.bestRb !== null;
+            let test6b = result3.bestRt !== null;
+            let test6c = Math.abs(result3.bestVout - 2) / 2 < 0.05;
+            let test6d = result3.bestIstring <= 0.001;
+            testResults.push(`Test 6 - Tight Constraints (5V, 2V, 1mA):`);
+            testResults.push(`  - Rb Found: ${test6a ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Rt Found: ${test6b ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Vout Accurate: ${test6c ? "✅ Passed" : "❌ Failed"}`);
+            testResults.push(`  - Current Limit: ${test6d ? "✅ Passed" : "❌ Failed"}`);
+            if (!test6a || !test6b || !test6c || !test6d) passed = false;
+
+            // Display results
+            document.getElementById("testResults").innerHTML = `
+                <h2>Test Results:</h2>
+                ${testResults.join("<br>")}
+                <br><strong>${passed ? "✅ All tests passed!" : "❌ Some tests failed."}</strong>
+            `;
+        }
+
+        function analyzeAllValues(Vin, Vo, Imax, extendedList) {
+            let bestError = Infinity;
+            let bestRb = null;
+            let bestRt = null;
+            let bestVout = null;
+            let bestIstring = null;
+            let bestPtop = null;
+            let bestPbot = null;
+
+            extendedList.forEach(Rb => {
+                let Ibottom = Vo / Rb;
+                if (Ibottom > Imax) return;
+                let idealRtop = (Vin - Vo) / Ibottom;
+                if (idealRtop <= 0) return;
+                let topCandidates = findTwoE96Values(idealRtop);
+                topCandidates.forEach(Rt => {
+                    let actualVout = Vin * (Rb / (Rb + Rt));
+                    if (actualVout > Vo) return;
+                    let error = calculateError(Vin, Vo, Rb, Rt);
+                    if (error < bestError) {
+                        bestError = error;
+                        bestRb = Rb;
+                        bestRt = Rt;
+                        bestVout = actualVout;
+                        bestIstring = Vin / (Rb + Rt);
+                        bestPtop = Rt * Math.pow(bestIstring, 2);
+                        bestPbot = Rb * Math.pow(bestIstring, 2);
+                    }
+                });
+            });
+
+            return { bestRb, bestRt, bestVout, bestIstring, bestPtop, bestPbot };
+        }
+    </script>
+</head>
+<body>
+    <img src="Resistive Divider.png" alt="Resistive Divider Circuit" style="display:block; margin:auto;">
+    <!-- LaTeX equations using MathJax -->
+    <div style="text-align: center; margin-top: 20px;">
+        \( V_o = V_{in} \times \left( \frac{R_{\text{bottom}}}{R_{\text{bottom}} + R_{\text{top}}} \right) \)
+    </div>
+    <div style="text-align: center; margin-top: 20px;">
+        \( I_{\text{string}} = \frac{V_{\text{in}}}{R_{\text{top}} + R_{\text{bottom}}} \)
+    </div>
+    <div style="text-align: center; margin-top: 20px;">
+        \( P_{\text{Rbottom}} = \frac{V_{\text{o}}^2}{R_{\text{bottom}}} \)
+    </div>
+    <div style="text-align: center; margin-top: 20px;">
+        \( P_{\text{Rtop}} = I_{\text{string}}^2 \cdot R_{\text{top}} \)
+    </div>
+
+    <h1>Resistor Divider Calculator</h1>
+    <form id="resistorForm">
+        <label for="Vin">Enter Vin (Input Voltage, V): </label>
+        <input type="number" id="Vin" step="any" required><br><br>
+        <label for="Vo">Enter Vo (Output Voltage, V): </label>
+        <input type="number" id="Vo" step="any" required><br><br>
+        <label for="Imax">Enter Imax (Maximum Current through Rbottom, A): </label>
+        <input type="number" id="Imax" step="any" required><br><br>
+        <input type="button" value="Calculate" onclick="calculateResistors()">
+        <input type="button" value="Run Tests" onclick="runTests()" style="margin-left: 10px;">
+    </form>
+    <h2>Results:</h2>
+    <div id="results"></div>
+    <div id="testResults" style="margin-top: 20px;"></div>
+</body>
+</html>
